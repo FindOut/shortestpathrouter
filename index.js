@@ -29,6 +29,93 @@ var PositionConstants = new function() {
 	this.NSEW = this.NORTH_SOUTH | this.EAST_WEST;
 }();
 
+var Geometry = {};
+	/**
+	 * Determines whether the two line segments p1->p2 and p3->p4, given by
+	 * p1=(x1, y1), p2=(x2,y2), p3=(x3,y3), p4=(x4,y4) intersect. Two line
+	 * segments are regarded to be intersecting in case they share at least one
+	 * common point, i.e if one of the two line segments starts or ends on the
+	 * other line segment or the line segments are collinear and overlapping,
+	 * then they are as well considered to be intersecting.
+	 * 
+	 * @param x1
+	 *            x coordinate of starting point of line segment 1
+	 * @param y1
+	 *            y coordinate of starting point of line segment 1
+	 * @param x2
+	 *            x coordinate of ending point of line segment 1
+	 * @param y2
+	 *            y coordinate of ending point of line segment 1
+	 * @param x3
+	 *            x coordinate of the starting point of line segment 2
+	 * @param y3
+	 *            y coordinate of the starting point of line segment 2
+	 * @param x4
+	 *            x coordinate of the ending point of line segment 2
+	 * @param y4
+	 *            y coordinate of the ending point of line segment 2
+	 * 
+	 * @return <code>true</code> if the two line segments formed by the given
+	 *         coordinates share at least one common point.
+	 * 
+	 * @since 3.1
+	 */
+	Geometry.linesIntersect = function(x1, y1, x2, y2,
+			x3, y3, x4, y4) {
+
+		// calculate bounding box of segment p1->p2
+		var bb1_x = Math.min(x1, x2);
+		var bb1_y = Math.min(y1, y2);
+		var bb2_x = Math.max(x1, x2);
+		var bb2_y = Math.max(y1, y2);
+
+		// calculate bounding box of segment p3->p4
+		var bb3_x = Math.min(x3, x4);
+		var bb3_y = Math.min(y3, y4);
+		var bb4_x = Math.max(x3, x4);
+		var bb4_y = Math.max(y3, y4);
+
+		// check if bounding boxes intersect
+		if (!(bb2_x >= bb3_x && bb4_x >= bb1_x && bb2_y >= bb3_y && bb4_y >= bb1_y)) {
+			// if bounding boxes do not intersect, line segments cannot
+			// intersect either
+			return false;
+		}
+
+		// If p3->p4 is inside the triangle p1-p2-p3, then check whether the
+		// line p1->p2 crosses the line p3->p4.
+		var p1p3_x = x1 - x3;
+		var p1p3_y = y1 - y3;
+		var p2p3_x = x2 - x3;
+		var p2p3_y = y2 - y3;
+		var p3p4_x = x3 - x4;
+		var p3p4_y = y3 - y4;
+		if (Geometry.productSign(Geometry.crossProduct(p2p3_x, p2p3_y, p3p4_x, p3p4_y),
+				Geometry.crossProduct(p3p4_x, p3p4_y, p1p3_x, p1p3_y)) >= 0) {
+			var p2p1_x = x2 - x1;
+			var p2p1_y = y2 - y1;
+			var p1p4_x = x1 - x4;
+			var p1p4_y = y1 - y4;
+			return Geometry.productSign(Geometry.crossProduct(-p1p3_x, -p1p3_y, p2p1_x, p2p1_y),
+					Geometry.crossProduct(p2p1_x, p2p1_y, p1p4_x, p1p4_y)) <= 0;
+		}
+		return false;
+	}
+
+	Geometry.productSign = function(x, y) {
+		if (x == 0 || y == 0) {
+			return 0;
+		} else if (x < 0 ^ y < 0) {
+			return -1;
+		}
+		return 1;
+	}
+
+	Geometry.crossProduct = function(x1, y1, x2, y2) {
+		return x1 * y2 - x2 * y1;
+	}
+
+
 function Point() {
 	return {x: 0, y: 0};
 }
@@ -56,6 +143,119 @@ function ArrayList() {
 	}
 	return list;
 }
+
+/**
+ * A Segment representation for the ShortestPathRouting. A segment is a line between
+ * two vertices.
+ * 
+ * This class is for internal use only
+ * @author Whitney Sorenson
+ * @since 3.0
+ */
+function Segment(start, end) {
+	/**
+	 * Creates a segment between the given start and end points.
+	 * @param start the start vertex
+	 * @param end the end vertex
+	 */
+	
+	this.start = start;
+	this.end = end;
+
+	/**
+	 * Returns the cosine of the made between this segment and the given segment
+	 * @param otherSegment the other segment
+	 * @return cosine value (not arc-cos)
+	 */
+	function cosine(otherSegment) {
+		var cos = (((this.start.x - this.end.x) * (otherSegment.end.x - otherSegment.start.x))
+				+ ((this.start.y - this.end.y) * (otherSegment.end.y - otherSegment.start.y)))
+					/ (getLength() * otherSegment.getLength());
+		var sin = (((this.start.x - this.end.x) * (otherSegment.end.y - otherSegment.start.y))
+				- ((this.start.y - this.end.y) * (otherSegment.end.x - otherSegment.start.x)));
+		if (sin < 0.0)
+			return (1 + cos);
+			
+		return -(1 + cos);
+	}
+
+	/**
+	 * Returns the cross product of this segment and the given segment
+	 * @param otherSegment the other segment
+	 * @return the cross product
+	 */
+	function crossProduct(otherSegment) {
+		return (((this.start.x - this.end.x) * (otherSegment.end.y - this.end.y))
+				- ((this.start.y - this.end.y) * (otherSegment.end.x - this.end.x)));
+	}
+
+	function getLength() {
+		return (this.end.getDistance(this.start));
+	}
+
+	/**
+	 * Returns a number that represents the sign of the slope of this segment. It does 
+	 * not return the actual slope.
+	 * @return number representing sign of the slope
+	 */
+	function getSlope() {
+		if (this.end.x - this.start.x >= 0) 
+			return (this.end.y - this.start.y);
+		else 
+			return -(this.end.y - this.start.y);
+	}
+
+	/**
+	 * Returns true if the given segment intersects this segment.
+	 * @param sx start x
+	 * @param sy start y
+	 * @param tx end x
+	 * @param ty end y
+	 * @return true if the segments intersect
+	 */
+	function intersects(sx, sy, tx, ty) {
+		var b1 = sy > ty ? ty : sy;
+		var b2 = sy > ty ? sy : ty;
+		var a1 = this.start.y > this.end.y ? this.end.y : this.start.y;
+		var a2 = this.start.y > this.end.y ? this.start.y : this.end.y;
+		if (b2 < a1 || a2 < b1)
+			return false;
+
+		var d1 = sx > tx ? tx : sx;
+		var d2 = sx > tx ? sx : tx;
+		var c1 = this.start.x > this.end.x ? this.end.x : this.start.x;
+		var c2 = this.start.x > this.end.x ? this.start.x : this.end.x;
+		if (d2 < c1 || c2 < d1) 
+			return false;
+		
+		return Geometry.linesIntersect(this.start.x, this.start.y, this.end.x, this.end.y, sx, sy, tx, ty);
+	}
+
+	/**
+	 * Return true if the segment represented by the points intersects this segment.
+	 * @param s start point
+	 * @param t end point
+	 * @return true if the segments intersect
+	 */
+	function intersects(s, t) {
+		return intersects(s.x, s.y, t.x, t.y);
+	}
+
+	/**
+	 * @see java.lang.Object#toString()
+	 */
+	function toString() {
+		return start + "---" + end;
+	}
+
+	this.intersects = intersects;
+	this.crossProduct = crossProduct;
+	this.getSlope = getSlope;
+//	this.xxx = xxx;
+
+	return this;
+}
+
 
 /**
  * A Path representation for the ShortestPathRouting. A Path has a start and end
@@ -107,10 +307,10 @@ function Path(a1, a2, a3) {
 	 * this field is for internal use only. It is true whenever a property has
 	 * been changed which requires the solver to resolve this path.
 	 */
-	var isDirty = true;
+	this.isDirty = true;
 
-	var isInverted = false;
-	var isMarked = false;
+	this.isInverted = false;
+	this.isMarked = false;
 	var points = new PointList();	// PointList
 
 	/**
@@ -545,7 +745,7 @@ function Path(a1, a2, a3) {
 	function createVisibilityGraph(allObstacles) {
 		stack.push(null);
 		stack.push(null);
-		stack.push(new Segment(start, end));
+		stack.push(new Segment(this.start, this.end));
 
 		while (stack.length != 0)
 			addSegment(stack.pop(), stack.popObstacle(), stack.popObstacle(),
@@ -584,13 +784,14 @@ function Path(a1, a2, a3) {
 	function fullReset() {
 		visibleVertices.length = 0;
 		segments.length = 0;
+		console.log('this.start', this.start);
 		if (prevCostRatio == 0) {
-			var distance = start.getDistance(end);
+			var distance = this.start.getDistance(this.end);
 			threshold = distance * OVAL_CONSTANT;
 		} else
-			threshold = prevCostRatio * EPSILON * start.getDistance(end);
+			threshold = prevCostRatio * EPSILON * this.start.getDistance(this.end);
 		visibleObstacles.length = 0;
-		resetPartial();
+		this.resetPartial();
 	}
 
 	/**
@@ -627,7 +828,7 @@ function Path(a1, a2, a3) {
 	 * @return end point for this path
 	 */
 	function getEndPoint() {
-		return end;
+		return this.end;
 	}
 
 	/**
@@ -645,7 +846,7 @@ function Path(a1, a2, a3) {
 	 * @return start point for this path
 	 */
 	function getStartPoint() {
-		return start;
+		return this.start;
 	}
 
 	/**
@@ -786,12 +987,12 @@ function Path(a1, a2, a3) {
 			grownSegments.addAll(subPath.grownSegments);
 
 			subPath.points.removePoint(0);
-			points.removePoint(points.length - 1);
-			points.addAll(subPath.points);
+			this.points.removePoint(points.length - 1);
+			this.points.addAll(subPath.points);
 
 			visibleObstacles.addAll(subPath.visibleObstacles);
 
-			end = subPath.end;
+			this.end = subPath.end;
 			subPath = undefined;
 		}
 	}
@@ -843,10 +1044,10 @@ function Path(a1, a2, a3) {
 	 * steps.
 	 */
 	function resetPartial() {
-		isMarked = false;
-		isInverted = false;
+		this.isMarked = false;
+		this.isInverted = false;
 		subPath = undefined;
-		isDirty = false;
+		this.isDirty = false;
 		grownSegments.length = 0;
 		points.removeAllPoints();
 	}
@@ -859,7 +1060,7 @@ function Path(a1, a2, a3) {
 	 */
 	function setBendPoints(bendPoints) {
 		this.bendpoints = bendPoints;
-		isDirty = true;
+		this.isDirty = true;
 	}
 
 	/**
@@ -872,7 +1073,7 @@ function Path(a1, a2, a3) {
 		if (end.equals(this.end))
 			return;
 		this.end = new Vertex(end, undefined);
-		isDirty = true;
+		this.isDirty = true;
 	}
 
 	/**
@@ -885,7 +1086,7 @@ function Path(a1, a2, a3) {
 		if (start.equals(this.start))
 			return;
 		this.start = new Vertex(start, unedfined);
-		isDirty = true;
+		this.isDirty = true;
 	}
 
 	/**
@@ -898,7 +1099,7 @@ function Path(a1, a2, a3) {
 	 * @return <code>true</code> if a clean path touches the obstacle
 	 */
 	function testAndSet(obs) {
-		if (isDirty)
+		if (this.isDirty)
 			return false;
 		// This will never actually happen because obstacles are not stored by
 		// identity
@@ -915,7 +1116,7 @@ function Path(a1, a2, a3) {
 			if (seg1.intersects(CURRENT, NEXT)
 					|| seg2.intersects(CURRENT, NEXT) || obs.contains(CURRENT)
 					|| obs.contains(NEXT)) {
-				isDirty = true;
+				this.isDirty = true;
 				return true;
 			}
 		}
@@ -929,6 +1130,13 @@ function Path(a1, a2, a3) {
     this.points = points;
     this.reconnectSubPaths = reconnectSubPaths;
     this.cleanup = cleanup;
+    this.testAndSet = testAndSet;
+    this.getBendPoints = getBendPoints;
+    this.getEndPoint = getEndPoint;
+    this.getStartPoint = getStartPoint;
+    this.getPoints = getPoints;
+    this.fullReset = fullReset;
+    this.generateShortestPath = generateShortestPath;
 
 	return this;
 }
@@ -945,202 +1153,202 @@ function Path(a1, a2, a3) {
  */
 function Vertex(a1, a2, a3) {
 
-  // constants for the vertex type
-  var NOT_SET = 0 // int
-  var INNIE = 1 // int
-  var OUTIE = 2 // int
+	// constants for the vertex type
+	var NOT_SET = 0 // int
+	var INNIE = 1 // int
+	var OUTIE = 2 // int
 
-  // for shortest path
-  var neighbors // List
-  var isPermanent = false;
-  var label // Vertex
-  var cost = 0 // double
-  var spacing = 0 // int
-  // for routing
-  var nearestObstacle = 0 // int
-  var offset = 0 // double
-  var type = NOT_SET; // int
-  var count = 0 // int
-  var totalCount = 0 // int
-  var obs // Obstacle
-  var paths // List
-  var nearestObstacleChecked = false;
-  var cachedCosines // Map
-  var positionOnObstacle = -1;  // int
+	// for shortest path
+	var neighbors // List
+	var isPermanent = false;
+	var label // Vertex
+	var cost = 0 // double
+	var spacing = 0 // int
+	// for routing
+	var nearestObstacle = 0 // int
+	var offset = 0 // double
+	var type = NOT_SET; // int
+	var count = 0 // int
+	var totalCount = 0 // int
+	var obs // Obstacle
+	var paths // List
+	var nearestObstacleChecked = false;
+	var cachedCosines // Map
+	var positionOnObstacle = -1;  // int
 
-  var origX, origY; // int
+	var origX, origY; // int
 
-  var _this = {
-    fullReset: fullReset
-  }
+	var _this = {
+	fullReset: fullReset
+	}
 
-  if (arguments.length == 3) {
-    // new Vertex(x, y, obstacle)
-    _this.x = a1;
-    _this.y = a2;
-    origX = a1;
-    origY = a2;
-    _this.obs = a3;
-    if (obs) {
-      spacing = 4;
-    }
-  } else {
-    // new Vertex(point, obstacle)
-    _this.x = a1.x;
-    _this.y = a1.y;
-    origX = a1.x;
-    origY = a1.y;
-    _this.obs = a2;
-    if (obs) {
-      spacing = 4;
-    }
-  }
+	if (arguments.length == 3) {
+	// new Vertex(x, y, obstacle)
+	_this.x = a1;
+	_this.y = a2;
+	origX = a1;
+	origY = a2;
+	_this.obs = a3;
+	if (obs) {
+	  spacing = 4;
+	}
+	} else {
+	// new Vertex(point, obstacle)
+	_this.x = a1.x;
+	_this.y = a1.y;
+	origX = a1.x;
+	origY = a1.y;
+	_this.obs = a2;
+	if (obs) {
+	  spacing = 4;
+	}
+	}
 
-  return _this;
+	/**
+	* Adds a path to this vertex, calculates angle between two segments and caches it.
+	*
+	* @param path the path
+	* @param start the segment to this vertex
+	* @param end the segment away from this vertex
+	*/
+	function addPath(path, start, end) {
+		if (!paths) {
+			paths = [];
+			cachedCosines = [];
+		}
+		if (!paths.contains(path))
+			paths.push(path);
+		cachedCosines[path] = start.cosine(end); // Double
+	}
 
-  /**
-   * Adds a path to this vertex, calculates angle between two segments and caches it.
-   *
-   * @param path the path
-   * @param start the segment to this vertex
-   * @param end the segment away from this vertex
-   */
-  function addPath(path, start, end) {
-  	if (!paths) {
-  		paths = [];
-  		cachedCosines = [];
-  	}
-  	if (!paths.contains(path))
-  		paths.push(path);
-  	cachedCosines[path] = start.cosine(end); // Double
-  }
+	/**
+	* Creates a point that represents this vertex offset by the given amount times
+	* the offset.
+	*
+	* @param modifier the offset
+	* @return a Point that has been bent around this vertex
+	*/
+	function bend(modifier) { // Point
+		var point = {x: x, y: y};
+		if ((positionOnObstacle & PositionConstants.NORTH) > 0)
+			point.y -= modifier * offset;
+		else
+			point.y += modifier * offset;
+		if ((positionOnObstacle & PositionConstants.EAST) > 0)
+			point.x += modifier * offset;
+		else
+			point.x -= modifier * offset;
+		return point;
+	}
 
-  /**
-   * Creates a point that represents this vertex offset by the given amount times
-   * the offset.
-   *
-   * @param modifier the offset
-   * @return a Point that has been bent around this vertex
-   */
-  function bend(modifier) { // Point
-  	var point = {x: x, y: y};
-  	if ((positionOnObstacle & PositionConstants.NORTH) > 0)
-  		point.y -= modifier * offset;
-  	else
-  		point.y += modifier * offset;
-  	if ((positionOnObstacle & PositionConstants.EAST) > 0)
-  		point.x += modifier * offset;
-  	else
-  		point.x -= modifier * offset;
-  	return point;
-  }
+	/**
+	* Resets all fields on this Vertex.
+	*/
+	function fullReset() {
+		totalCount = 0;
+		type = NOT_SET;
+		count = 0;
+		cost = 0;
+	//	offset = getSpacing();
+		offset = spacing;
+		nearestObstacle = 0;
+		label = undefined;
+		nearestObstacleChecked = false;
+		isPermanent = false;
+		neighbors = undefined;
+	//	if (neighbors != null)
+	//		neighbors.length = 0;
+		cachedCosines = undefined;
+	//	if (cachedCosines != null)
+	//		cachedCosines.length = 0;
+		paths = undefined;
+	//	if (paths != null)
+	//		paths.length = 0;
+	}
 
-  /**
-   * Resets all fields on this Vertex.
-   */
-  function fullReset() {
-  	totalCount = 0;
-  	type = NOT_SET;
-  	count = 0;
-  	cost = 0;
-  //	offset = getSpacing();
-  	offset = spacing;
-  	nearestObstacle = 0;
-  	label = undefined;
-  	nearestObstacleChecked = false;
-  	isPermanent = false;
-  	neighbors = undefined;
-  //	if (neighbors != null)
-  //		neighbors.length = 0;
-  	cachedCosines = undefined;
-  //	if (cachedCosines != null)
-  //		cachedCosines.length = 0;
-  	paths = undefined;
-  //	if (paths != null)
-  //		paths.length = 0;
-  }
+	/**
+	* Returns a Rectangle that represents the region around this vertex that
+	* paths will be traveling in.
+	*
+	* @param extraOffset a buffer to add to the region.
+	* @return the rectangle
+	*/
+	function getDeformedRectangle(extraOffset) {  // Rectangle
+		rect = {x: 0, y: 0, width: 0, height: 0};
 
-  /**
-   * Returns a Rectangle that represents the region around this vertex that
-   * paths will be traveling in.
-   *
-   * @param extraOffset a buffer to add to the region.
-   * @return the rectangle
-   */
-  function getDeformedRectangle(extraOffset) {  // Rectangle
-  	rect = {x: 0, y: 0, width: 0, height: 0};
+		if ((positionOnObstacle & PositionConstants.NORTH) > 0) {
+			rect.y = y - extraOffset;
+			rect.height = origY - y + extraOffset;
+		} else {
+			rect.y = origY;
+			rect.height = y - origY + extraOffset;
+		}
+		if ((positionOnObstacle & PositionConstants.EAST) > 0) {
+			rect.x = origX;
+			rect.width = x - origX + extraOffset;
+		} else {
+			rect.x = x - extraOffset;
+			rect.width = origX - x + extraOffset;
+		}
 
-  	if ((positionOnObstacle & PositionConstants.NORTH) > 0) {
-  		rect.y = y - extraOffset;
-  		rect.height = origY - y + extraOffset;
-  	} else {
-  		rect.y = origY;
-  		rect.height = y - origY + extraOffset;
-  	}
-  	if ((positionOnObstacle & PositionConstants.EAST) > 0) {
-  		rect.x = origX;
-  		rect.width = x - origX + extraOffset;
-  	} else {
-  		rect.x = x - extraOffset;
-  		rect.width = origX - x + extraOffset;
-  	}
+		return rect;
+	}
+	/*
+	private int getSpacing() {
+		if (obs == null)
+			return 0;
+		return obs.getSpacing();
+	}
+	*/
+	/**
+	* Grows this vertex by its offset to its maximum size.
+	*/
+	function grow() {
+		var modifier // int
 
-  	return rect;
-  }
-  /*
-  private int getSpacing() {
-  	if (obs == null)
-  		return 0;
-  	return obs.getSpacing();
-  }
-  */
-  /**
-   * Grows this vertex by its offset to its maximum size.
-   */
-  function grow() {
-  	var modifier // int
+		if (nearestObstacle == 0) {
+	//		modifier = totalCount * getSpacing();
+			modifier = totalCount * spacing;
+		} else {
+			modifier = (nearestObstacle / 2) - 1;
+	}
+		if ((positionOnObstacle & PositionConstants.NORTH) > 0) {
+			_this.y -= modifier;
+		} else {
+	  _this.y += modifier;
+		}
 
-  	if (nearestObstacle == 0) {
-  //		modifier = totalCount * getSpacing();
-  		modifier = totalCount * spacing;
-  	} else {
-  		modifier = (nearestObstacle / 2) - 1;
-    }
-  	if ((positionOnObstacle & PositionConstants.NORTH) > 0) {
-  		_this.y -= modifier;
-  	} else {
-      _this.y += modifier;
-  	}
+	if ((positionOnObstacle & PositionConstants.EAST) > 0) {
+	  _this.x += modifier;
+		} else {
+	  _this.x -= modifier
+	}
+	}
 
-    if ((positionOnObstacle & PositionConstants.EAST) > 0) {
-      _this.x += modifier;
-  	} else {
-      _this.x -= modifier
-    }
-  }
+	/**
+	* Shrinks this vertex to its original size.
+	*/
+	function shrink() {
+		_this.x = _this.origX;
+	_this.y = _this.origY;
+	}
 
-  /**
-   * Shrinks this vertex to its original size.
-   */
-  function shrink() {
-  	_this.x = _this.origX;
-    _this.y = _this.origY;
-  }
+	/**
+	* Updates the offset of this vertex based on its shortest distance.
+	*/
+	function updateOffset() {
+		if (nearestObstacle != 0) {
+			offset = ((nearestObstacle / 2) - 1) / totalCount;
+		}
+	}
 
-  /**
-   * Updates the offset of this vertex based on its shortest distance.
-   */
-  function updateOffset() {
-  	if (nearestObstacle != 0) {
-  		offset = ((nearestObstacle / 2) - 1) / totalCount;
-    }
-  }
-
-	this.getDistance = function(vertex) {
+	_this.getDistance = function(vertex) {
 		var dx = _this.x - vertex.x;
 		var dy = _this.y - vertex.y;
 		return Math.sqrt(dx * dx + dy * dy);
 	}
+
+  return _this;
 }
 
 /**
@@ -1864,7 +2072,9 @@ function ShortestPathRouter() {
      * @return returns the list of paths which were updated.
      */
     function solve() {  // list
-    	solveDirtyPaths();
+    	var numSolved = solveDirtyPaths();
+
+    	console.log('numSolved', numSolved);
 
     	countVertices();
     	checkVertexIntersections();
@@ -1895,6 +2105,7 @@ function ShortestPathRouter() {
      */
     function solveDirtyPaths() {
     	console.log('solveDirtyPaths userPaths', userPaths);
+    	console.log('  workingPaths', workingPaths);
     	var numSolved = 0;
 
     	for (var i = 0; i < userPaths.length; i++) {
@@ -1902,6 +2113,7 @@ function ShortestPathRouter() {
     		if (!path.isDirty)
     			continue;
     		var children = pathsToChildPaths[path];   // List
+    		console.log('  children:', children);
     		var prevCount = 1, newCount = 1;
     		if (!children)
     			children = [];
@@ -1913,6 +2125,7 @@ function ShortestPathRouter() {
 
     		if (prevCount != newCount)
     			children = regenerateChildPaths(path, children, prevCount, newCount);
+
     		refreshChildrenEndpoints(path, children);
     	}
 
@@ -1920,6 +2133,7 @@ function ShortestPathRouter() {
     		var path = workingPaths[i];   // Path
     		path.refreshExcludedObstacles(userObstacles);
     		if (!path.isDirty) {
+    			console.log('  not dirty');
     			path.resetPartial();
     			continue;
     		}
