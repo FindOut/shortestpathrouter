@@ -29,6 +29,37 @@ var PositionConstants = new function() {
 	this.NSEW = this.NORTH_SOUTH | this.EAST_WEST;
 }();
 
+function checkClass(o, clazz, msg) {
+	if (!(Object.getPrototypeOf(o) === clazz.prototype)) {
+		throw new Error('invalid class. Should be ' + clazz.name + ' is ' + o + (msg || ''))
+	}
+}
+
+function checkObstacles(obstacles) {
+	for (var i = 0; i < obstacles.length; i++) {
+		checkClass(obstacles[i], Obstacle, ' i:' + i)
+	}
+}
+
+function arrayContainsEqual(a, o) {
+	for (var i in a) {
+		if (a[i].equals(o)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function arrayReverse(a) {
+	var i = 0, j = a.length - 1;
+	while (i < j) {
+		var t = a[i];
+		a[i] = a[j];
+		a[j] = t;
+		i++; j--;
+	}
+}
+
 var Geometry = {};
 	/**
 	 * Determines whether the two line segments p1->p2 and p3->p4, given by
@@ -144,6 +175,8 @@ function ArrayList() {
 	return list;
 }
 
+//-------------------------Segment
+
 /**
  * A Segment representation for the ShortestPathRouting. A segment is a line between
  * two vertices.
@@ -170,7 +203,7 @@ function Segment(start, end) {
 	function cosine(otherSegment) {
 		var cos = (((this.start.x - this.end.x) * (otherSegment.end.x - otherSegment.start.x))
 				+ ((this.start.y - this.end.y) * (otherSegment.end.y - otherSegment.start.y)))
-					/ (getLength() * otherSegment.getLength());
+					/ (this.getLength() * otherSegment.getLength());
 		var sin = (((this.start.x - this.end.x) * (otherSegment.end.y - otherSegment.start.y))
 				- ((this.start.y - this.end.y) * (otherSegment.end.x - otherSegment.start.x)));
 		if (sin < 0.0)
@@ -213,7 +246,7 @@ function Segment(start, end) {
 	 * @param ty end y
 	 * @return true if the segments intersect
 	 */
-	function intersects(sx, sy, tx, ty) {
+	function intersects4(sx, sy, tx, ty) {
 		var b1 = sy > ty ? ty : sy;
 		var b2 = sy > ty ? sy : ty;
 		var a1 = this.start.y > this.end.y ? this.end.y : this.start.y;
@@ -237,8 +270,8 @@ function Segment(start, end) {
 	 * @param t end point
 	 * @return true if the segments intersect
 	 */
-	function intersects(s, t) {
-		return intersects(s.x, s.y, t.x, t.y);
+	function intersects2(s, t) {
+		return this.intersects4(s.x, s.y, t.x, t.y);
 	}
 
 	/**
@@ -248,14 +281,17 @@ function Segment(start, end) {
 		return start + "---" + end;
 	}
 
-	this.intersects = intersects;
+	this.intersects2 = intersects2;
+	this.intersects4 = intersects4;
 	this.crossProduct = crossProduct;
 	this.getSlope = getSlope;
-//	this.xxx = xxx;
+	this.cosine = cosine;
+	this.getLength = getLength;
 
 	return this;
 }
 
+//-------------------------Path
 
 /**
  * A Path representation for the ShortestPathRouting. A Path has a start and end
@@ -275,6 +311,9 @@ function Path(a1, a2, a3) {
 	function SegmentStack() {
 		var stack = [];
 		return {
+			length: function() {
+				return stack.length
+			},
 			pop: function() {
 				return stack.pop();
 			},
@@ -283,6 +322,9 @@ function Path(a1, a2, a3) {
 			},
 			push: function(obj) {
 				stack.push(obj);
+			},
+			top: function() {
+				return stack[stack.length - 1];
 			}
 		}
 	}
@@ -323,18 +365,15 @@ function Path(a1, a2, a3) {
 	var stack = new SegmentStack();	// SegmentStack
 	var subPath;	// Path
 	var threshold;	// double
-	var visibleObstacles = {};	// Set
-	var visibleVertices = {};	// Set
+	var visibleObstacles = [];	// Set
+	var visibleVertices = [];	// Set
 
 
-
-
-	console.log('new Path(', arguments, ')', arguments.length);
 
 	if (arguments.length == 1) {
 		this.data = a1;
 	} else if (arguments.length == 2) {
-		if (a1.prototype == Vertex.prototype) {
+		if (a1.prototype === Vertex.prototype) {
 			this.start = a1;
 	    	this.end = a2;
 		} else {
@@ -343,7 +382,7 @@ function Path(a1, a2, a3) {
 		}
 	} else if (arguments.length == 3) {
     	this.data = a1;
-		if (a2.prototype == Vertex.prototype) {
+		if (a2.prototype === Vertex.prototype) {
 			this.start = a2;
 			this.end = a3;
 		} else {
@@ -352,7 +391,6 @@ function Path(a1, a2, a3) {
 		}
 	}
 
-	console.log('Path start:',this.start,' end:',this.end);
 
 	/**
 	 * Attempts to add all segments between the given obstacles to the
@@ -364,41 +402,44 @@ function Path(a1, a2, a3) {
 	 *            the target obstacle
 	 */
 	function addAllSegmentsBetween(source, target) {
-		addConnectingSegment(new Segment(source.bottomLeft, target.bottomLeft),
+		checkClass(source, Obstacle);
+		checkClass(target, Obstacle);
+
+		addConnectingSegment(new Segment(source.bottomLeft(), target.bottomLeft()),
 				source, target, false, false);
 		addConnectingSegment(
-				new Segment(source.bottomRight, target.bottomRight), source,
+				new Segment(source.bottomRight(), target.bottomRight()), source,
 				target, true, true);
-		addConnectingSegment(new Segment(source.topLeft, target.topLeft),
+		addConnectingSegment(new Segment(source.topLeft(), target.topLeft()),
 				source, target, true, true);
-		addConnectingSegment(new Segment(source.topRight, target.topRight),
+		addConnectingSegment(new Segment(source.topRight(), target.topRight()),
 				source, target, false, false);
 
 		if (source.bottom() == target.bottom()) {
-			addConnectingSegment(new Segment(source.bottomLeft,
-					target.bottomRight), source, target, false, true);
-			addConnectingSegment(new Segment(source.bottomRight,
-					target.bottomLeft), source, target, true, false);
+			addConnectingSegment(new Segment(source.bottomLeft(),
+					target.bottomRight()), source, target, false, true);
+			addConnectingSegment(new Segment(source.bottomRight(),
+					target.bottomLeft()), source, target, true, false);
 		}
 		if (source.y == target.y) {
-			addConnectingSegment(new Segment(source.topLeft, target.topRight),
+			addConnectingSegment(new Segment(source.topLeft(), target.topRight()),
 					source, target, true, false);
-			addConnectingSegment(new Segment(source.topRight, target.topLeft),
+			addConnectingSegment(new Segment(source.topRight(), target.topLeft()),
 					source, target, false, true);
 		}
 		if (source.x == target.x) {
 			addConnectingSegment(
-					new Segment(source.bottomLeft, target.topLeft), source,
+					new Segment(source.bottomLeft(), target.topLeft()), source,
 					target, false, true);
 			addConnectingSegment(
-					new Segment(source.topLeft, target.bottomLeft), source,
+					new Segment(source.topLeft(), target.bottomLeft()), source,
 					target, true, false);
 		}
 		if (source.right() == target.right()) {
-			addConnectingSegment(new Segment(source.bottomRight,
-					target.topRight), source, target, true, false);
-			addConnectingSegment(new Segment(source.topRight,
-					target.bottomRight), source, target, false, true);
+			addConnectingSegment(new Segment(source.bottomRight(),
+					target.topRight()), source, target, true, false);
+			addConnectingSegment(new Segment(source.topRight(),
+					target.bottomRight()), source, target, false, true);
 		}
 	}
 
@@ -414,11 +455,15 @@ function Path(a1, a2, a3) {
 	 *            the first obstacle
 	 * @param o2
 	 *            the second obstacle
-	 * @param checkTopRight1
+	 * @param checktopRight()1
 	 *            whether or not to check the diagonal containing top right
 	 *            point
 	 */
-	function addConnectingSegment(segment, o1, o2, checkTopRight1, checkTopRight2) {
+	function addConnectingSegment(segment, o1, o2, checktopRight1, checktopRight2) {
+		checkClass(segment, Segment);
+		checkClass(o1, Obstacle);
+		checkClass(o2, Obstacle);
+
 		if (threshold != 0
 				&& (segment.end.getDistance(end)
 						+ segment.end.getDistance(start) > threshold || segment.start
@@ -428,20 +473,20 @@ function Path(a1, a2, a3) {
 		if (o2.containsProper(segment.start) || o1.containsProper(segment.end))
 			return;
 
-		if (checkTopRight1
-				&& segment.intersects(o1.x, o1.bottom() - 1, o1.right() - 1,
+		if (checktopRight1
+				&& segment.intersects4(o1.x, o1.bottom() - 1, o1.right() - 1,
 						o1.y))
 			return;
-		if (checkTopRight2
-				&& segment.intersects(o2.x, o2.bottom() - 1, o2.right() - 1,
+		if (checktopRight2
+				&& segment.intersects4(o2.x, o2.bottom() - 1, o2.right() - 1,
 						o2.y))
 			return;
-		if (!checkTopRight1
-				&& segment.intersects(o1.x, o1.y, o1.right() - 1,
+		if (!checktopRight1
+				&& segment.intersects4(o1.x, o1.y, o1.right() - 1,
 						o1.bottom() - 1))
 			return;
-		if (!checkTopRight2
-				&& segment.intersects(o2.x, o2.y, o2.right() - 1,
+		if (!checktopRight2
+				&& segment.intersects4(o2.x, o2.y, o2.right() - 1,
 						o2.bottom() - 1))
 			return;
 
@@ -457,20 +502,18 @@ function Path(a1, a2, a3) {
 	 *            the new obstacle, should not be in the graph already
 	 */
 	function addObstacle(newObs) {
+		checkClass(newObs, Obstacle);
+
 		visibleObstacles.push(newObs);
-		var voSet = {};
 		for (var i = 0; i < visibleObstacles.length; i++) {
-			var vo = visibleObstacles[i];
-			if (!voSet[vo]) {
-				voSet[vo] = "dummy";
-				if (newObs != currObs) {
-					addSegmentsFor(newObs, currObs);
-				}
+			var currObs = visibleObstacles[i];
+			if (newObs != currObs) {
+				addSegmentsFor(newObs, currObs);
 			}
 		}
 		addPerimiterSegments(newObs);
-		addSegmentsFor(start, newObs);
-		addSegmentsFor(end, newObs);
+		addSegmentsFor(this.start, newObs);
+		addSegmentsFor(this.end, newObs);
 	}
 
 	/**
@@ -481,19 +524,21 @@ function Path(a1, a2, a3) {
 	 *            the obstacle
 	 */
 	function addPerimiterSegments(obs) {
-		var seg = new Segment(obs.topLeft, obs.topRight);
+		checkClass(obs, Obstacle);
+
+		var seg = new Segment(obs.topLeft(), obs.topRight());
 		stack.push(obs);
 		stack.push(undefined);
 		stack.push(seg);
-		seg = new Segment(obs.topRight, obs.bottomRight);
+		seg = new Segment(obs.topRight(), obs.bottomRight());
 		stack.push(obs);
 		stack.push(undefined);
 		stack.push(seg);
-		seg = new Segment(obs.bottomRight, obs.bottomLeft);
+		seg = new Segment(obs.bottomRight(), obs.bottomLeft());
 		stack.push(obs);
 		stack.push(undefined);
 		stack.push(seg);
-		seg = new Segment(obs.bottomLeft, obs.topLeft);
+		seg = new Segment(obs.bottomLeft(), obs.topLeft());
 		stack.push(obs);
 		stack.push(undefined);
 		stack.push(seg);
@@ -515,27 +560,32 @@ function Path(a1, a2, a3) {
 	 *            the list of all obstacles
 	 */
 	function addSegment(segment, exclude1, exclude2, allObstacles) {
+		checkClass(segment, Segment);
+		exclude1 && checkClass(exclude1, Obstacle);
+		exclude2 && checkClass(exclude2, Obstacle);
+		// console.log('allObstacles', allObstacles);
+
+		// console.log('addSegment(.start:',segment.start,', ');
 		if (threshold != 0
-				&& (segment.end.getDistance(end)
-						+ segment.end.getDistance(start) > threshold || segment.start
-						.getDistance(end) + segment.start.getDistance(start) > threshold)) {
+			&& (segment.end.getDistance(this.end)
+					+ segment.end.getDistance(this.start) > threshold || segment.start
+					.getDistance(this.end) + segment.start.getDistance(this.start) > threshold)) {
 			return;
 		}
 
 		for (var i = 0; i < allObstacles.length; i++) {
 			var obs = allObstacles[i];
+			checkClass(obs, Obstacle);
 
 			if (obs == exclude1 || obs == exclude2 || obs.exclude) {
 				continue;
 			}
-			if (segment.intersects(obs.x, obs.y, obs.right() - 1,
-					obs.bottom() - 1)
-					|| segment.intersects(obs.x, obs.bottom() - 1,
-							obs.right() - 1, obs.y)
+			if (segment.intersects4(obs.x, obs.y, obs.right() - 1, obs.bottom() - 1)
+					|| segment.intersects4(obs.x, obs.bottom() - 1, obs.right() - 1, obs.y)
 					|| obs.containsProper(segment.start)
 					|| obs.containsProper(segment.end)) {
-				if (!visibleObstacles.contains(obs))
-					addObstacle(obs);
+				if (!arrayContainsEqual(visibleObstacles, obs))
+					this.addObstacle(obs);
 				return;
 			}
 		}
@@ -552,6 +602,9 @@ function Path(a1, a2, a3) {
 	 *            target obstacle
 	 */
 	function addSegmentsFor(source, target) {
+		checkClass(source, Obstacle);
+		checkClass(target, Obstacle);
+
 		if (source.intersects(target))
 			addAllSegmentsBetween(source, target);
 		else if (target.bottom() - 1 < source.y)
@@ -573,49 +626,52 @@ function Path(a1, a2, a3) {
 	 *            target obstacle
 	 */
 	function addSegmentsFor(vertex, obs) {
+		checkClass(vertex, Vertex);
+		checkClass(obs, Obstacle);
+
 		var seg = undefined;
 		var seg2 = undefined;
 
 		switch (obs.getPosition(vertex)) {
 		case PositionConstants.SOUTH_WEST:
 		case PositionConstants.NORTH_EAST:
-			seg = new Segment(vertex, obs.topLeft);
-			seg2 = new Segment(vertex, obs.bottomRight);
+			seg = new Segment(vertex, obs.topLeft());
+			seg2 = new Segment(vertex, obs.bottomRight());
 			break;
 		case PositionConstants.SOUTH_EAST:
 		case PositionConstants.NORTH_WEST:
-			seg = new Segment(vertex, obs.topRight);
-			seg2 = new Segment(vertex, obs.bottomLeft);
+			seg = new Segment(vertex, obs.topRight());
+			seg2 = new Segment(vertex, obs.bottomLeft());
 			break;
 		case PositionConstants.NORTH:
-			seg = new Segment(vertex, obs.topLeft);
-			seg2 = new Segment(vertex, obs.topRight);
+			seg = new Segment(vertex, obs.topLeft());
+			seg2 = new Segment(vertex, obs.topRight());
 			break;
 		case PositionConstants.EAST:
-			seg = new Segment(vertex, obs.bottomRight);
-			seg2 = new Segment(vertex, obs.topRight);
+			seg = new Segment(vertex, obs.bottomRight());
+			seg2 = new Segment(vertex, obs.topRight());
 			break;
 		case PositionConstants.SOUTH:
-			seg = new Segment(vertex, obs.bottomRight);
-			seg2 = new Segment(vertex, obs.bottomLeft);
+			seg = new Segment(vertex, obs.bottomRight());
+			seg2 = new Segment(vertex, obs.bottomLeft());
 			break;
 		case PositionConstants.WEST:
-			seg = new Segment(vertex, obs.topLeft);
-			seg2 = new Segment(vertex, obs.bottomLeft);
+			seg = new Segment(vertex, obs.topLeft());
+			seg2 = new Segment(vertex, obs.bottomLeft());
 			break;
 		default:
 			if (vertex.x == obs.x) {
-				seg = new Segment(vertex, obs.topLeft);
-				seg2 = new Segment(vertex, obs.bottomLeft);
+				seg = new Segment(vertex, obs.topLeft());
+				seg2 = new Segment(vertex, obs.bottomLeft());
 			} else if (vertex.y == obs.y) {
-				seg = new Segment(vertex, obs.topLeft);
-				seg2 = new Segment(vertex, obs.topRight);
+				seg = new Segment(vertex, obs.topLeft());
+				seg2 = new Segment(vertex, obs.topRight());
 			} else if (vertex.y == obs.bottom() - 1) {
-				seg = new Segment(vertex, obs.bottomLeft);
-				seg2 = new Segment(vertex, obs.bottomRight);
+				seg = new Segment(vertex, obs.bottomLeft());
+				seg2 = new Segment(vertex, obs.bottomRight());
 			} else if (vertex.x == obs.right() - 1) {
-				seg = new Segment(vertex, obs.topRight);
-				seg2 = new Segment(vertex, obs.bottomRight);
+				seg = new Segment(vertex, obs.topRight());
+				seg2 = new Segment(vertex, obs.bottomRight());
 			} else {
 				throw "Unexpected vertex conditions";
 			}
@@ -631,21 +687,23 @@ function Path(a1, a2, a3) {
 
 	// Obstacle source, Obstacle target
 	function addSegmentsTargetAboveSource(source, target) {
+		checkClass(source, Obstacle);
+		checkClass(target, Obstacle);
 		// target located above source
 		var seg = undefined;
 		var seg2 = undefined;
 		if (target.x > source.x) {
-			seg = new Segment(source.topLeft, target.topLeft);
+			seg = new Segment(source.topLeft(), target.topLeft());
 			if (target.x < source.right() - 1)
-				seg2 = new Segment(source.topRight, target.bottomLeft);
+				seg2 = new Segment(source.topRight(), target.bottomLeft());
 			else
-				seg2 = new Segment(source.bottomRight, target.topLeft);
+				seg2 = new Segment(source.bottomRight(), target.topLeft());
 		} else if (source.x == target.x) {
-			seg = new Segment(source.topLeft, target.bottomLeft);
-			seg2 = new Segment(source.topRight, target.bottomLeft);
+			seg = new Segment(source.topLeft(), target.bottomLeft());
+			seg2 = new Segment(source.topRight(), target.bottomLeft());
 		} else {
-			seg = new Segment(source.bottomLeft, target.bottomLeft);
-			seg2 = new Segment(source.topRight, target.bottomLeft);
+			seg = new Segment(source.bottomLeft(), target.bottomLeft());
+			seg2 = new Segment(source.topRight(), target.bottomLeft());
 		}
 
 		stack.push(source);
@@ -658,17 +716,17 @@ function Path(a1, a2, a3) {
 		seg2 = undefined;
 
 		if (target.right() < source.right()) {
-			seg = new Segment(source.topRight, target.topRight);
+			seg = new Segment(source.topRight(), target.topRight());
 			if (target.right() - 1 > source.x)
-				seg2 = new Segment(source.topLeft, target.bottomRight);
+				seg2 = new Segment(source.topLeft(), target.bottomRight());
 			else
-				seg2 = new Segment(source.bottomLeft, target.topRight);
+				seg2 = new Segment(source.bottomLeft(), target.topRight());
 		} else if (source.right() == target.right()) {
-			seg = new Segment(source.topRight, target.bottomRight);
-			seg2 = new Segment(source.topLeft, target.bottomRight);
+			seg = new Segment(source.topRight(), target.bottomRight());
+			seg2 = new Segment(source.topLeft(), target.bottomRight());
 		} else {
-			seg = new Segment(source.bottomRight, target.bottomRight);
-			seg2 = new Segment(source.topLeft, target.bottomRight);
+			seg = new Segment(source.bottomRight(), target.bottomRight());
+			seg2 = new Segment(source.topLeft(), target.bottomRight());
 		}
 
 		stack.push(source);
@@ -680,23 +738,25 @@ function Path(a1, a2, a3) {
 	}
 
 	// Obstacle source, Obstacle target
-	function addSegmentsTargetBesideSource(dource, target) {
+	function addSegmentsTargetBesideSource(source, target) {
+		checkClass(source, Obstacle);
+		checkClass(target, Obstacle);
 		// target located above source
 		var seg = undefined;
 		var seg2 = undefined;
 		if (target.y > source.y) {
-			seg = new Segment(source.topLeft, target.topLeft);
+			seg = new Segment(source.topLeft(), target.topLeft());
 			if (target.y < source.bottom() - 1)
-				seg2 = new Segment(source.bottomLeft, target.topRight);
+				seg2 = new Segment(source.bottomLeft(), target.topRight());
 			else
-				seg2 = new Segment(source.bottomRight, target.topLeft);
+				seg2 = new Segment(source.bottomRight(), target.topLeft());
 		} else if (source.y == target.y) {
 			// degenerate case
-			seg = new Segment(source.topLeft, target.topRight);
-			seg2 = new Segment(source.bottomLeft, target.topRight);
+			seg = new Segment(source.topLeft(), target.topRight());
+			seg2 = new Segment(source.bottomLeft(), target.topRight());
 		} else {
-			seg = new Segment(source.topRight, target.topRight);
-			seg2 = new Segment(source.bottomLeft, target.topRight);
+			seg = new Segment(source.topRight(), target.topRight());
+			seg2 = new Segment(source.bottomLeft(), target.topRight());
 		}
 		stack.push(source);
 		stack.push(target);
@@ -708,17 +768,17 @@ function Path(a1, a2, a3) {
 		seg2 = undefined;
 
 		if (target.bottom() < source.bottom()) {
-			seg = new Segment(source.bottomLeft, target.bottomLeft);
+			seg = new Segment(source.bottomLeft(), target.bottomLeft());
 			if (target.bottom() - 1 > source.y)
-				seg2 = new Segment(source.topLeft, target.bottomRight);
+				seg2 = new Segment(source.topLeft(), target.bottomRight());
 			else
-				seg2 = new Segment(source.topRight, target.bottomLeft);
+				seg2 = new Segment(source.topRight(), target.bottomLeft());
 		} else if (source.bottom() == target.bottom()) {
-			seg = new Segment(source.bottomLeft, target.bottomRight);
-			seg2 = new Segment(source.topLeft, target.bottomRight);
+			seg = new Segment(source.bottomLeft(), target.bottomRight());
+			seg2 = new Segment(source.topLeft(), target.bottomRight());
 		} else {
-			seg = new Segment(source.bottomRight, target.bottomRight);
-			seg2 = new Segment(source.topLeft, target.bottomRight);
+			seg = new Segment(source.bottomRight(), target.bottomRight());
+			seg2 = new Segment(source.topLeft(), target.bottomRight());
 		}
 		stack.push(source);
 		stack.push(target);
@@ -743,13 +803,16 @@ function Path(a1, a2, a3) {
 	 *            list of all obstacles
 	 */
 	function createVisibilityGraph(allObstacles) {
+		checkObstacles(allObstacles);
+
 		stack.push(null);
 		stack.push(null);
 		stack.push(new Segment(this.start, this.end));
 
-		while (stack.length != 0)
-			addSegment(stack.pop(), stack.popObstacle(), stack.popObstacle(),
-					allObstacles);
+		while (stack.length() != 0) {
+			// console.log('cvg2',stack.length());
+			this.addSegment(stack.pop(), stack.popObstacle(), stack.popObstacle(), allObstacles);
+		}
 	}
 
 	/**
@@ -760,13 +823,13 @@ function Path(a1, a2, a3) {
 	 * @return true if a path can be found.
 	 */
 	function determineShortestPath() {
-		if (!labelGraph())
+		if (!this.labelGraph())
 			return false;
-		var vertex = end;
-		prevCostRatio = end.cost / start.getDistance(end);
+		var vertex = this.end;
+		prevCostRatio = this.end.cost / this.start.getDistance(this.end);
 
 		var nextVertex;
-		while (!vertex.equals(start)) {
+		while (!vertex.equals(this.start)) {
 			nextVertex = vertex.label;
 			if (!nextVertex)
 				return false;
@@ -774,7 +837,7 @@ function Path(a1, a2, a3) {
 			vertex = nextVertex;
 		}
 
-		Collections.reverse(segments);
+		arrayReverse(segments);
 		return true;
 	}
 
@@ -784,7 +847,6 @@ function Path(a1, a2, a3) {
 	function fullReset() {
 		visibleVertices.length = 0;
 		segments.length = 0;
-		console.log('this.start', this.start);
 		if (prevCostRatio == 0) {
 			var distance = this.start.getDistance(this.end);
 			threshold = distance * OVAL_CONSTANT;
@@ -803,12 +865,12 @@ function Path(a1, a2, a3) {
 	 * @return true if a shortest path was found
 	 */
 	function generateShortestPath(allObstacles) {
-		createVisibilityGraph(allObstacles);
+		this.createVisibilityGraph(allObstacles);
 
 		if (visibleVertices.length == 0)
 			return false;
 
-		return determineShortestPath();
+		return this.determineShortestPath();
 	}
 
 	/**
@@ -909,7 +971,7 @@ function Path(a1, a2, a3) {
 	 */
 	function labelGraph() {
 		var numPermanentNodes = 1;
-		var vertex = start;
+		var vertex = this.start;
 		var neighborVertex = undefined;
 		vertex.isPermanent = true;
 		var newCost;
@@ -962,7 +1024,7 @@ function Path(a1, a2, a3) {
 		if (segment.end.neighbors == null)
 			segment.end.neighbors = [];
 
-		if (!segment.start.neighbors.contains(segment.end)) {
+		if (!arrayContainsEqual(segment.start.neighbors, segment.end)) {
 			segment.start.neighbors.push(segment.end);
 			segment.end.neighbors.push(segment.start);
 		}
@@ -1070,6 +1132,8 @@ function Path(a1, a2, a3) {
 	 *            the new end point for this path
 	 */
 	function setEndPoint(end) {
+					if (!end.getDistance) throw 'new Path(no vertex!, ) '
+
 		if (end.equals(this.end))
 			return;
 		this.end = new Vertex(end, undefined);
@@ -1083,6 +1147,8 @@ function Path(a1, a2, a3) {
 	 *            the new start point for this path
 	 */
 	function setStartPoint(start) {
+					if (!start.getDistance) throw 'new Path(no vertex!, ) '
+
 		if (start.equals(this.start))
 			return;
 		this.start = new Vertex(start, unedfined);
@@ -1106,15 +1172,15 @@ function Path(a1, a2, a3) {
 		if (excludedObstacles.contains(obs))
 			return false;
 
-		var seg1 = new Segment(obs.topLeft, obs.bottomRight);
-		var seg2 = new Segment(obs.topRight, obs.bottomLeft);
+		var seg1 = new Segment(obs.topLeft(), obs.bottomRight());
+		var seg2 = new Segment(obs.topRight(), obs.bottomLeft());
 
 		for (var s = 0; s < points.length - 1; s++) {
 			points.getPoint(CURRENT, s);
 			points.getPoint(NEXT, s + 1);
 
-			if (seg1.intersects(CURRENT, NEXT)
-					|| seg2.intersects(CURRENT, NEXT) || obs.contains(CURRENT)
+			if (seg1.intersects2(CURRENT, NEXT)
+					|| seg2.intersects2(CURRENT, NEXT) || obs.contains(CURRENT)
 					|| obs.contains(NEXT)) {
 				this.isDirty = true;
 				return true;
@@ -1137,10 +1203,16 @@ function Path(a1, a2, a3) {
     this.getPoints = getPoints;
     this.fullReset = fullReset;
     this.generateShortestPath = generateShortestPath;
+    this.createVisibilityGraph = createVisibilityGraph;
+    this.addSegment = addSegment;
+    this.addObstacle = addObstacle;
+    this.determineShortestPath = determineShortestPath;
+    this.labelGraph = labelGraph;
 
 	return this;
 }
 
+//-------------------------Vertex
 
 /**
  * A vertex representation for the ShortestPathRouting. Vertices are either one of
@@ -1178,27 +1250,28 @@ function Vertex(a1, a2, a3) {
 
 	var origX, origY; // int
 
-	var _this = {
-	fullReset: fullReset
-	}
+	this.fullReset = fullReset;
+	this.addPath = addPath;
+	this.cachedCosines = function() {return cachedCosines};
+	this.bend = bend;
 
 	if (arguments.length == 3) {
 	// new Vertex(x, y, obstacle)
-	_this.x = a1;
-	_this.y = a2;
+	this.x = a1;
+	this.y = a2;
 	origX = a1;
 	origY = a2;
-	_this.obs = a3;
+	this.obs = a3;
 	if (obs) {
 	  spacing = 4;
 	}
 	} else {
 	// new Vertex(point, obstacle)
-	_this.x = a1.x;
-	_this.y = a1.y;
+	this.x = a1.x;
+	this.y = a1.y;
 	origX = a1.x;
 	origY = a1.y;
-	_this.obs = a2;
+	this.obs = a2;
 	if (obs) {
 	  spacing = 4;
 	}
@@ -1214,9 +1287,9 @@ function Vertex(a1, a2, a3) {
 	function addPath(path, start, end) {
 		if (!paths) {
 			paths = [];
-			cachedCosines = [];
+			cachedCosines = {};
 		}
-		if (!paths.contains(path))
+		if (!arrayContainsEqual(paths, path))
 			paths.push(path);
 		cachedCosines[path] = start.cosine(end); // Double
 	}
@@ -1229,7 +1302,7 @@ function Vertex(a1, a2, a3) {
 	* @return a Point that has been bent around this vertex
 	*/
 	function bend(modifier) { // Point
-		var point = {x: x, y: y};
+		var point = {x: this.x, y: this.y};
 		if ((positionOnObstacle & PositionConstants.NORTH) > 0)
 			point.y -= modifier * offset;
 		else
@@ -1313,15 +1386,15 @@ function Vertex(a1, a2, a3) {
 			modifier = (nearestObstacle / 2) - 1;
 	}
 		if ((positionOnObstacle & PositionConstants.NORTH) > 0) {
-			_this.y -= modifier;
+			this.y -= modifier;
 		} else {
-	  _this.y += modifier;
+	  this.y += modifier;
 		}
 
 	if ((positionOnObstacle & PositionConstants.EAST) > 0) {
-	  _this.x += modifier;
+	  this.x += modifier;
 		} else {
-	  _this.x -= modifier
+	  this.x -= modifier
 	}
 	}
 
@@ -1329,8 +1402,8 @@ function Vertex(a1, a2, a3) {
 	* Shrinks this vertex to its original size.
 	*/
 	function shrink() {
-		_this.x = _this.origX;
-	_this.y = _this.origY;
+		this.x = this.origX;
+	this.y = this.origY;
 	}
 
 	/**
@@ -1342,14 +1415,20 @@ function Vertex(a1, a2, a3) {
 		}
 	}
 
-	_this.getDistance = function(vertex) {
-		var dx = _this.x - vertex.x;
-		var dy = _this.y - vertex.y;
+	this.getDistance = function(vertex) {
+		var dx = this.x - vertex.x;
+		var dy = this.y - vertex.y;
 		return Math.sqrt(dx * dx + dy * dy);
 	}
 
-  return _this;
+	this.equals = function(v) {
+		return this.x === v.x && this.y === v.y;
+	}
+	
+  	return this;
 }
+
+//-------------------------Obstacle
 
 /**
  * An obstacle representation for the ShortestPathRouting. This is a subclass of Rectangle.
@@ -1363,26 +1442,74 @@ function Vertex(a1, a2, a3) {
  * @param rect the bounds
  */
 function Obstacle(rect, router) {
-  var exclude;
-  var topLeft, topRight, bottomLeft, bottomRight, center; // Vertex
-  var _this = {
-		topLeft: function() {return topLeft},
-		topRight: function() {return topRight},
-		bottomLeft: function() {return bottomLeft},
-		bottomRight: function() {return bottomRight},
-		center: function() {return center},
-    /**
-     * Returns <code>true</code> if the given point is contained but not on the boundary of
-     * this obstacle.
-     * @param p a point
-     * @return <code>true</code> if properly contained
-     */
-    containsProper: function(p) {
-    	return p.x > _this.x
-    		&& p.x < _this.x + this.width - 1
-    		&& p.y > _this.y
-    		&& p.y < _this.y + this.height - 1;
+	var exclude;
+	var topLeft, topRight, bottomLeft, bottomRight, center; // Vertex
+
+	this.topLeft = function() {return topLeft};
+	this.topRight = function() {return topRight};
+	this.bottomLeft = function() {return bottomLeft};
+	this.bottomRight = function() {return bottomRight};
+	this.center = function() {return center};
+	this.right = function() {return topRight.x};
+	this.bottom = function() {return bottomLeft.y};
+
+		/**
+		 * <P>
+		 * Returns an integer which represents the position of the given point with
+		 * respect to this rectangle. Possible return values are bitwise ORs of the
+		 * constants WEST, EAST, NORTH, and SOUTH as found in
+		 * {@link org.eclipse.draw2d.PositionConstants}.
+		 * 
+		 * <P>
+		 * Returns PositionConstant.NONE if the given point is inside this
+		 * Rectangle.
+		 * 
+		 * @param p
+		 *            The Point whose position has to be determined
+		 * @return An <code>int</code> which is a PositionConstant
+		 * @see org.eclipse.draw2d.PositionConstants
+		 * @since 2.0
+		 */
+	this.getPosition = function(p) {
+		var result = PositionConstants.NONE;
+
+		if (this.contains(p))
+			return result;
+
+		if (p.x < this.x)
+			result = PositionConstants.WEST;
+		else if (p.x >= (this.x + this.width))
+			result = PositionConstants.EAST;
+
+		if (p.y < this.y)
+			result = result | PositionConstants.NORTH;
+		else if (p.y >= (this.y + this.height))
+			result = result | PositionConstants.SOUTH;
+
+		return result;
+	};
+
+
+	this.equals = function(o) {
+		return this.x === o.x
+			&& this.y === o.y
+			&& this.width === o.width
+			&& this.height === o.height;
+	};
+
+	    /**
+	     * Returns <code>true</code> if the given point is contained but not on the boundary of
+	     * this obstacle.
+	     * @param p a point
+	     * @return <code>true</code> if properly contained
+	     */
+    this.containsProper = function(p) {
+    	return p.x > this.x
+    		&& p.x < this.x + this.width - 1
+    		&& p.y > this.y
+    		&& p.y < this.y + this.height - 1;
     },
+
     /**
      * Returns whether the given coordinates are within the boundaries of this
      * Rectangle. The boundaries are inclusive of the top and left edges, but
@@ -1395,9 +1522,9 @@ function Obstacle(rect, router) {
      * @return true if the coordinates are within this Rectangle
      * @since 2.0
      */
-    containsXY: function(x, y) {
-      return y >= _this.y && y < _this.y + _this.height
-          && x >= _this.x && x < _this.x + _this.width;
+    this.containsXY = function(x, y) {
+      return y >= this.y && y < this.y + this.height
+          && x >= this.x && x < this.x + this.width;
     },
 
     /**
@@ -1410,17 +1537,17 @@ function Obstacle(rect, router) {
      * @return true if the Point is within this Rectangle
      * @since 2.0
      */
-    contains: function(p) {
-      return _this.containsXY(p.x, p.y);
+    this.contains = function(p) {
+      return this.containsXY(p.x, p.y);
     },
 
-    getSpacing: function() {
+    this.getSpacing = function() {
     	return router.getSpacing();
     },
     /**
      * Grows all vertices on this obstacle.
      */
-    growVertices: function() {
+    this.growVertices = function() {
     	growVertex(topLeft);
     	growVertex(topRight);
     	growVertex(bottomLeft);
@@ -1429,7 +1556,7 @@ function Obstacle(rect, router) {
     /**
      * Requests a full reset on all four vertices of this obstacle.
      */
-    reset: function() {
+    this.reset = function() {
     	topLeft.fullReset();
     	bottomLeft.fullReset();
     	bottomRight.fullReset();
@@ -1438,53 +1565,44 @@ function Obstacle(rect, router) {
     /**
      * Shrinks all four vertices of this obstacle.
      */
-    shrinkVertices: function() {
+    this.shrinkVertices = function() {
     	shrinkVertex(topLeft);
     	shrinkVertex(topRight);
     	shrinkVertex(bottomLeft);
     	shrinkVertex(bottomRight);
     }
 
-  };
+	this.router = router;
+	this.x = rect.x;
+	this.y = rect.y;
+	this.width = rect.width;
+	this.height = rect.height;
 
-  init(rect);
-  this.router = router;
+	topLeft = new Vertex(this.x, this.y, this);
+	topLeft.positionOnObstacle = PositionConstants.NORTH_WEST;
+	topRight = new Vertex(this.x + this.width - 1, this.y, this);
+	topRight.positionOnObstacle = PositionConstants.NORTH_EAST;
+	bottomLeft = new Vertex(this.x, this.y + this.height - 1, this);
+	bottomLeft.positionOnObstacle = PositionConstants.SOUTH_WEST;
+	bottomRight = new Vertex(this.x + this.width - 1, this.y + this.height - 1, this);
+	bottomRight.positionOnObstacle = PositionConstants.SOUTH_EAST;
+	center = new Vertex(this.x + this.width / 2, this.y + this.height / 2, this);
 
-  /**
-   * Initializes this obstacle to the values of the given rectangle
-   *
-   * @param rect bounds of this obstacle
-   */
-  function init(rect) {
-  	_this.x = rect.x;
-  	_this.y = rect.y;
-  	_this.width = rect.width;
-  	_this.height = rect.height;
+	exclude = false;
 
-  	exclude = false;
+	function growVertex(vertex) {
+		if (vertex.totalCount > 0)
+			vertex.grow();
+	}
 
-  	topLeft = new Vertex(_this.x, _this.y, _this);
-  	topLeft.positionOnObstacle = PositionConstants.NORTH_WEST;
-  	topRight = new Vertex(_this.x + _this.width - 1, _this.y, _this);
-  	topRight.positionOnObstacle = PositionConstants.NORTH_EAST;
-  	bottomLeft = new Vertex(_this.x, _this.y + _this.height - 1, _this);
-  	bottomLeft.positionOnObstacle = PositionConstants.SOUTH_WEST;
-  	bottomRight = new Vertex(_this.x + _this.width - 1, _this.y + _this.height - 1, _this);
-  	bottomRight.positionOnObstacle = PositionConstants.SOUTH_EAST;
-  	center = new Vertex(_this.x + _this.width / 2, _this.y + _this.height / 2, _this);
-  }
-
-  function growVertex(vertex) {
-  	if (vertex.totalCount > 0)
-  		vertex.grow();
-  }
-
-  function shrinkVertex(vertex) {
-  	if (vertex.totalCount > 0)
-  		vertex.shrink();
-  }
-  return _this;
+	function shrinkVertex(vertex) {
+		if (vertex.totalCount > 0)
+			vertex.shrink();
+	}
+	return this;
 }
+
+//-------------------------ShortestPathRouter
 
 /**
  * @ngdoc service
@@ -1504,7 +1622,7 @@ function ShortestPathRouter() {
     var stack;	// PathStack
     var subPaths;	// List
 
-    var userObstacles = new ArrayList();	// List
+    var userObstacles = [];	// List
     var userPaths = [];	// List
     var workingPaths = [];	// List
 
@@ -1607,7 +1725,7 @@ function ShortestPathRouter() {
     		var path = workingPaths[i];  // Path
 
     		for (var s = 0; s < path.segments.length - 1; s++) {
-    			vertex = path.segments[s].end;
+    			var vertex = path.segments[s].end;
     			checkVertexForIntersections(vertex);
     		}
     	}
@@ -1770,6 +1888,7 @@ function ShortestPathRouter() {
      * @param obs the obstacle
      */
     function internalAddObstacle(obs) {
+    	checkClass(obs, Obstacle);
     	userObstacles.push(obs);
     	return testAndDirtyPaths(obs);
     }
@@ -1794,9 +1913,9 @@ function ShortestPathRouter() {
 
     	result = false;
     	result |= dirtyPathsOn(obs.bottomLeft);
-    	result |= dirtyPathsOn(obs.topLeft);
-    	result |= dirtyPathsOn(obs.bottomRight);
-    	result |= dirtyPathsOn(obs.topRight);
+    	result |= dirtyPathsOn(obs.topLeft());
+    	result |= dirtyPathsOn(obs.bottomRight());
+    	result |= dirtyPathsOn(obs.topRight());
 
     	for (var p = 0; p < workingPaths.length; p++) {
     		var path = workingPaths[p];   // Path
@@ -1821,7 +1940,7 @@ function ShortestPathRouter() {
     		segment = path.grownSegments[v];
     		nextSegment = path.grownSegments[v + 1];
     		vertex = segment.end;
-    		var crossProduct = segment.crossProduct(new Segment(vertex, vertex.obs.center));
+    		var crossProduct = segment.crossProduct(new Segment(vertex, vertex.obs.center()));
 
     		if (vertex.type == Vertex.NOT_SET) {
     			labelVertex(segment, crossProduct, path);
@@ -1920,14 +2039,14 @@ function ShortestPathRouter() {
     	for (var v = 0; v < path.grownSegments.length - 1; v++) {
     		segment = path.grownSegments[v];
     		vertex = segment.end;
-    		var thisAngle = vertex.cachedCosines[path].doubleValue(); // double
+    		var thisAngle = vertex.cachedCosines()[path]; // double
     		if (path.isInverted)
     			thisAngle = -thisAngle;
 
     		for (var i in vertex.paths) {
     			var vPath = vertex.paths[i];   // Path
     			if (!vPath.isMarked) {
-    				otherAngle = vertex.cachedCosines[vPath].doubleValue();  // double
+    				otherAngle = vertex.cachedCosines()[vPath];  // double
 
     				if (vPath.isInverted)
     					otherAngle = -otherAngle;
@@ -2040,16 +2159,13 @@ function ShortestPathRouter() {
      * Resets all vertices found on paths and obstacles.
      */
     function resetVertices() {
-    	console.log('resetVertices workingPaths',workingPaths);
     	for (var i = 0; i < userObstacles.length; i++) {
     		var obs = userObstacles[i];   // Obstacle
     		obs.reset();
     	}
     	for (var i = 0; i < workingPaths.length; i++) {
     		var path = workingPaths[i];   // Path
-    		console.log('resetVertices path.start:', path.start);
     		path.start.fullReset();
-    		console.log('resetVertices path.end:', path.end);
     		path.end.fullReset();
     	}
     }
@@ -2072,9 +2188,9 @@ function ShortestPathRouter() {
      * @return returns the list of paths which were updated.
      */
     function solve() {  // list
+    	checkObstacles(userObstacles);
     	var numSolved = solveDirtyPaths();
 
-    	console.log('numSolved', numSolved);
 
     	countVertices();
     	checkVertexIntersections();
@@ -2104,8 +2220,6 @@ function ShortestPathRouter() {
      * @return number of dirty paths
      */
     function solveDirtyPaths() {
-    	console.log('solveDirtyPaths userPaths', userPaths);
-    	console.log('  workingPaths', workingPaths);
     	var numSolved = 0;
 
     	for (var i = 0; i < userPaths.length; i++) {
@@ -2113,7 +2227,6 @@ function ShortestPathRouter() {
     		if (!path.isDirty)
     			continue;
     		var children = pathsToChildPaths[path];   // List
-    		console.log('  children:', children);
     		var prevCount = 1, newCount = 1;
     		if (!children)
     			children = [];
@@ -2131,9 +2244,9 @@ function ShortestPathRouter() {
 
     	for (var i = 0; i < workingPaths.length; i++) {
     		var path = workingPaths[i];   // Path
+    		checkObstacles(userObstacles);
     		path.refreshExcludedObstacles(userObstacles);
     		if (!path.isDirty) {
-    			console.log('  not dirty');
     			path.resetPartial();
     			continue;
     		}
@@ -2141,7 +2254,7 @@ function ShortestPathRouter() {
     		numSolved++;
     		path.fullReset();
 
-    		pathFoundCheck = path.generateShortestPath(userObstacles);
+    		var pathFoundCheck = path.generateShortestPath(userObstacles);
     		if (!pathFoundCheck || path.end.cost > path.threshold) {
     			// path not found, or path found was too long
     			resetVertices();
@@ -2239,27 +2352,27 @@ function ShortestPathRouter() {
 
     		var offset = getSpacing();  // int
     		if (segment.getSlope() < 0) {
-    			if (segment.intersects(obs.topLeft.x - offset,
-    					obs.topLeft.y - offset,
-    					obs.bottomRight.x + offset,
-    					obs.bottomRight.y + offset))
-    				vertex = getNearestVertex(obs.topLeft, obs.bottomRight, segment);
-    			else if (segment.intersects(obs.bottomLeft.x - offset,
-    					obs.bottomLeft.y + offset,
-    					obs.topRight.x + offset,
-    					obs.topRight.y - offset))
-    				vertex = getNearestVertex(obs.bottomLeft, obs.topRight, segment);
+    			if (segment.intersects4(obs.topLeft().x - offset,
+    					obs.topLeft().y - offset,
+    					obs.bottomRight().x + offset,
+    					obs.bottomRight().y + offset))
+    				vertex = getNearestVertex(obs.topLeft(), obs.bottomRight(), segment);
+    			else if (segment.intersects4(obs.bottomLeft().x - offset,
+    					obs.bottomLeft().y + offset,
+    					obs.topRight().x + offset,
+    					obs.topRight().y - offset))
+    				vertex = getNearestVertex(obs.bottomLeft(), obs.topRight(), segment);
     		} else {
-    			if (segment.intersects(obs.bottomLeft.x - offset,
-    					obs.bottomLeft.y + offset,
-    					obs.topRight.x + offset,
-    					obs.topRight.y - offset))
-    				vertex = getNearestVertex(obs.bottomLeft, obs.topRight, segment);
-    			else if (segment.intersects(obs.topLeft.x - offset,
-    					obs.topLeft.y - offset,
-    					obs.bottomRight.x + offset,
-    					obs.bottomRight.y + offset))
-    				vertex = getNearestVertex(obs.topLeft, obs.bottomRight, segment);
+    			if (segment.intersects4(obs.bottomLeft().x - offset,
+    					obs.bottomLeft().y + offset,
+    					obs.topRight().x + offset,
+    					obs.topRight().y - offset))
+    				vertex = getNearestVertex(obs.bottomLeft(), obs.topRight(), segment);
+    			else if (segment.intersects4(obs.topLeft().x - offset,
+    					obs.topLeft().y - offset,
+    					obs.bottomRight().x + offset,
+    					obs.bottomRight().y + offset))
+    				vertex = getNearestVertex(obs.topLeft(), obs.bottomRight(), segment);
     		}
 
     		if (vertex != null) {
